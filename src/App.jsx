@@ -2,12 +2,15 @@ import { useEffect, useState } from 'react';
 import mqtt from 'mqtt';
 
 function App() {
-  const [sensorData, setSensorData] = useState({
+  const [currentData, setCurrentData] = useState({
     adc: 0,
     co2: 0,
     nh3: 0,
-    nox: 0
+    nox: 0,
+    time: '-'
   });
+  
+  const [history, setHistory] = useState([]);
   const [connectionStatus, setConnectionStatus] = useState('Menghubungkan...');
 
   useEffect(() => {
@@ -37,7 +40,26 @@ function App() {
       if (topic === 'proyek/sensor/mq135') {
         try {
           const parsedData = JSON.parse(message.toString());
-          setSensorData(parsedData);
+          
+          const now = new Date();
+          const timeString = now.toLocaleTimeString('id-ID', {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit'
+          });
+
+          const newData = {
+            adc: parsedData.adc,
+            co2: parsedData.co2 ? parsedData.co2.toFixed(2) : '0.00',
+            nh3: parsedData.nh3 ? parsedData.nh3.toFixed(2) : '0.00',
+            nox: parsedData.nox ? parsedData.nox.toFixed(2) : '0.00',
+            time: timeString
+          };
+
+          setCurrentData(newData);
+          
+          setHistory((prevHistory) => [newData, ...prevHistory]);
+
         } catch (e) {
           console.error("Gagal mengurai JSON:", e);
         }
@@ -56,28 +78,31 @@ function App() {
     };
   }, []);
 
-  const calculateR0 = (adc) => {
-    if (!adc || adc === 0) return "0.00";
-    
-    let VRL = adc * (5.0 / 1023.0);
-    if (VRL === 0) VRL = 0.001;
-    
-    const RL = 1.0; 
-    
-    const Rs = ((5.0 * RL) / VRL) - RL;
-    
-    const R0 = Rs / 3.6;
-    
-    return R0.toFixed(2);
-  };
+  const downloadExcel = () => {
+    if (history.length === 0) {
+      alert("Belum ada data untuk diunduh.");
+      return;
+    }
 
-  const currentR0 = calculateR0(sensorData.adc);
+    const headers = "Waktu,Sinyal ADC,CO2 (ppm),NH3 (ppm),NOx (ppm)\n";
+    const rows = history.map(row => `${row.time},${row.adc},${row.co2},${row.nh3},${row.nox}`).join("\n");
+    
+    const blob = new Blob([headers + rows], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", "Data_Log_MQ135.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   return (
     <div className="min-h-screen bg-slate-100 p-8 font-sans">
-      <div className="max-w-4xl mx-auto">
+      <div className="max-w-5xl mx-auto space-y-8">
         
-        <div className="bg-slate-900 rounded-xl p-6 mb-6 shadow-lg text-white flex justify-between items-center">
+        <div className="bg-slate-900 rounded-xl p-6 shadow-lg text-white flex justify-between items-center">
           <div>
             <h1 className="text-2xl font-bold">IoT Gas Monitor</h1>
             <p className="text-slate-400 text-sm mt-1">Sensor: MQ-135 Semiconductor</p>
@@ -88,31 +113,11 @@ function App() {
           </div>
         </div>
 
-        <div className="bg-indigo-50 rounded-xl p-6 mb-6 shadow-sm border border-indigo-200 flex justify-between items-center">
-          <div>
-            <h2 className="text-indigo-800 font-bold text-lg flex items-center">
-              <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 mr-3 animate-ping"></span>
-              Mode Kalibrasi Aktif
-            </h2>
-            <p className="text-indigo-600 text-sm mt-1">Fluktuasi nilai dasar resistansi secara periodik selama fase burn-in +24 jam.</p>
-          </div>
-          <div className="text-right">
-            <div className="flex items-end justify-end space-x-2">
-              <span className="text-4xl font-extrabold text-indigo-900">{currentR0}</span>
-              <span className="text-indigo-600 font-medium mb-1">kΩ</span>
-            </div>
-            <p className="text-indigo-400 text-xs mt-1">Nilai R0</p>
-          </div>
-        </div>
-
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          
           <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
             <h2 className="text-slate-500 text-sm font-semibold mb-2">Estimasi CO2</h2>
             <div className="flex items-end space-x-2">
-              <span className="text-4xl font-extrabold text-slate-800">
-                {sensorData.co2.toFixed(1)}
-              </span>
+              <span className="text-4xl font-extrabold text-slate-800">{currentData.co2}</span>
               <span className="text-slate-400 font-medium mb-1">ppm</span>
             </div>
           </div>
@@ -120,9 +125,7 @@ function App() {
           <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
             <h2 className="text-slate-500 text-sm font-semibold mb-2">Estimasi NH3 (Amonia)</h2>
             <div className="flex items-end space-x-2">
-              <span className="text-4xl font-extrabold text-slate-800">
-                {sensorData.nh3.toFixed(2)}
-              </span>
+              <span className="text-4xl font-extrabold text-slate-800">{currentData.nh3}</span>
               <span className="text-slate-400 font-medium mb-1">ppm</span>
             </div>
           </div>
@@ -130,9 +133,7 @@ function App() {
           <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
             <h2 className="text-slate-500 text-sm font-semibold mb-2">Estimasi NOx</h2>
             <div className="flex items-end space-x-2">
-              <span className="text-4xl font-extrabold text-slate-800">
-                {sensorData.nox.toFixed(2)}
-              </span>
+              <span className="text-4xl font-extrabold text-slate-800">{currentData.nox}</span>
               <span className="text-slate-400 font-medium mb-1">ppm</span>
             </div>
           </div>
@@ -140,14 +141,56 @@ function App() {
           <div className="bg-slate-50 rounded-xl p-6 shadow-sm border border-slate-200">
             <h2 className="text-slate-500 text-sm font-semibold mb-2">Sinyal Analog (ADC)</h2>
             <div className="flex items-end space-x-2">
-              <span className="text-4xl font-extrabold text-slate-600">
-                {sensorData.adc}
-              </span>
+              <span className="text-4xl font-extrabold text-slate-600">{currentData.adc}</span>
               <span className="text-slate-400 font-medium mb-1">/ 1023</span>
             </div>
           </div>
-
         </div>
+
+        <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-slate-800 text-lg font-bold">Log Data Akuisisi</h2>
+            <button 
+              onClick={downloadExcel}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center"
+            >
+              <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+              Unduh CSV / Excel
+            </button>
+          </div>
+          
+          <div className="overflow-x-auto border rounded-lg max-h-96 overflow-y-auto">
+            <table className="min-w-full text-left text-sm text-slate-600">
+              <thead className="bg-slate-50 sticky top-0 border-b">
+                <tr>
+                  <th className="px-6 py-3 font-semibold text-slate-800">Waktu (WIB)</th>
+                  <th className="px-6 py-3 font-semibold text-slate-800">Sinyal (ADC)</th>
+                  <th className="px-6 py-3 font-semibold text-slate-800">CO2 (ppm)</th>
+                  <th className="px-6 py-3 font-semibold text-slate-800">NH3 (ppm)</th>
+                  <th className="px-6 py-3 font-semibold text-slate-800">NOx (ppm)</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {history.length === 0 ? (
+                  <tr>
+                    <td colSpan="5" className="px-6 py-8 text-center text-slate-400">Menunggu transmisi data masuk...</td>
+                  </tr>
+                ) : (
+                  history.map((row, index) => (
+                    <tr key={index} className="hover:bg-slate-50">
+                      <td className="px-6 py-3 font-medium text-slate-700">{row.time}</td>
+                      <td className="px-6 py-3">{row.adc}</td>
+                      <td className="px-6 py-3">{row.co2}</td>
+                      <td className="px-6 py-3">{row.nh3}</td>
+                      <td className="px-6 py-3">{row.nox}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
       </div>
     </div>
   );
